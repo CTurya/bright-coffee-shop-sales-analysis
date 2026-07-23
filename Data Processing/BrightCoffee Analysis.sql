@@ -1,82 +1,79 @@
 -- Databricks notebook source
 -- DBTITLE 1,Cell 1
------Bright Coffee Shop Sales Analysis
-
-------Objective
-
-------The objective of this project is to clean, transform, and analyze coffee shop sales data to provide business insights for the CEO.
-
-
--- ==========================================
+-- ==========================================================
 -- Bright Coffee Shop Sales Analysis
--- Step 1: Data Cleaning & Transformation
--- ==========================================
+-- Data Cleaning & Transformation
+-- Author: Charlotte Turya
+-- ==========================================================
+
+CREATE OR REPLACE VIEW vw_coffee_sales AS
 
 WITH coffee_sales_clean AS (
 
-SELECT
-    transaction_id,
-    transaction_date,
-    transaction_time,
-    transaction_qty,
-    store_id,
-    store_location,
-    product_id,
+    SELECT
+        transaction_id,
+        transaction_date,
+        transaction_time,
+        transaction_qty,
+        store_id,
+        store_location,
+        product_id,
 
-    -- Convert unit_price to numeric
-    CAST(REPLACE(unit_price, ',', '.') AS DOUBLE) AS unit_price,
+        -- Convert unit_price from string to numeric
+        CAST(REPLACE(unit_price, ',', '.') AS DOUBLE) AS unit_price,
 
-    product_category,
-    product_type,
-    product_detail,
+        product_category,
+        product_type,
+        product_detail,
 
-    -- Calculate revenue
-    transaction_qty * CAST(REPLACE(unit_price, ',', '.') AS DOUBLE) AS total_amount,
+        -- Calculate Total Sales Amount
+        transaction_qty * CAST(REPLACE(unit_price, ',', '.') AS DOUBLE) AS total_amount,
 
-    -- Extract hour,day name, week name and month name from timestamp
-    HOUR(transaction_time) AS transaction_hour,
-    DAYNAME(transaction_date) AS transaction_dayname,
-    WEEKDAY(transaction_date) AS transaction_weekday,
-    MONTHNAME(transaction_date) AS transaction_month
+        -- Extract Hour from Transaction Time
+        HOUR(transaction_time) AS transaction_hour
 
-FROM bright.coffee.shop
+    FROM workspace.default.coffee_sales_clean
 
 ),
 
 coffee_sales_enriched AS (
 
-SELECT
-    *,
+    SELECT
+        *,
 
-    -- Time Buckets
-    CASE
-        WHEN transaction_hour BETWEEN 6 AND 11 THEN 'Morning'
-        WHEN transaction_hour BETWEEN 12 AND 17 THEN 'Afternoon'
-        WHEN transaction_hour BETWEEN 18 AND 24 THEN 'Evening'
-        ELSE 'Late Night'
-    END AS transaction_time_bucket,
+        -- Time of Day Buckets
+        CASE
+            WHEN transaction_hour BETWEEN 0 AND 11 THEN 'Morning'
+            WHEN transaction_hour BETWEEN 12 AND 17 THEN 'Afternoon'
+            WHEN transaction_hour BETWEEN 18 AND 24 THEN 'Evening'
+            ELSE 'Very Late'
+        END AS transaction_time_bucket,
 
-    ---- Weekend vs Weekday
-    CASE
-        WHEN DAYOFWEEK(transaction_date) IN (1,7)
-        THEN 'Weekend'
-        ELSE 'Weekday'
-        END AS Day_Type,
+        -- Sales Category
+        CASE
+            WHEN total_amount < 10 THEN 'Small Purchase'
+            WHEN total_amount BETWEEN 10 AND 20 THEN 'Medium Purchase'
+            ELSE 'Large Purchase'
+        END AS sales_category,
 
-    -- Sales Buckets
-    CASE
-        WHEN total_amount < 10 THEN 'Small Purchase'
-        WHEN total_amount BETWEEN 10 AND 20 THEN 'Medium Purchase'
-        ELSE 'Large Purchase'
-    END AS sales_category
+        -- Day of Week
+        DATE_FORMAT(transaction_date, 'EEEE') AS day_of_week,
 
-FROM coffee_sales_clean
+        -- Month Name
+        DATE_FORMAT(transaction_date, 'MMMM') AS month_name,
+
+        -- Weekend / Weekday
+        CASE
+            WHEN DAYOFWEEK(transaction_date) IN (1,7) THEN 'Weekend'
+            ELSE 'Weekday'
+        END AS day_type
+
+    FROM coffee_sales_clean
 
 )
 
 SELECT *
 FROM coffee_sales_enriched;
-
 
 
 -----------------------------------Answering the CEO's questions------------------------------------
@@ -161,6 +158,44 @@ FROM coffee_sales_clean
 GROUP BY store_location, product_category
 ORDER BY store_location, total_revenue DESC;
 
+------Query 9: Which store performs best?(Bar Chart)
+SELECT
+    store_location,
+    ROUND(SUM(total_amount),2) AS total_revenue,
+    SUM(transaction_qty) AS quantity_sold,
+    RANK() OVER (ORDER BY SUM(total_amount) DESC) AS store_rank
+FROM vw_coffee_sales
+GROUP BY store_location
+ORDER BY store_rank;
+
+
+-----Query 10:Best-selling products by store
+SELECT
+    store_location,
+    product_detail,
+    ROUND(SUM(total_amount),2) AS total_revenue,
+    RANK() OVER (
+        PARTITION BY store_location
+        ORDER BY SUM(total_amount) DESC
+    ) AS product_rank
+FROM vw_coffee_sales
+GROUP BY
+    store_location,
+    product_detail
+ORDER BY
+    store_location,
+    product_rank
+LIMIT 5;
+
+
+-----Query 11: When are sales at their highest?
+SELECT
+    transaction_time_bucket,
+    COUNT(*) AS total_transactions,
+    ROUND(SUM(total_amount),2) AS total_revenue
+FROM vw_coffee_sales
+GROUP BY transaction_time_bucket
+ORDER BY total_revenue DESC;
 
 
 --------# Key Business Insights------------
